@@ -1,0 +1,27 @@
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# AWS and Serverless generated files
+.aws-sam/
+.serverless/
+**/.serverless/
+
+# Build outputs
+frontend/dist/
+backend/dist/
+
+# Logs and local files
+*.log
+.DS_Store
+Thumbs.db
+
+# Local backups and test artifacts
+*.backup
+backend/test.txt

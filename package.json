@@ -1,0 +1,21 @@
+{
+  "name": "museum-ticket-system",
+  "version": "2.0.0",
+  "description": "Museum and Exhibition Ticket Booking System on AWS Serverless with Zero-Config Local Mode",
+  "scripts": {
+    "start": "node start.js",
+    "dev": "node start.js",
+    "test:backend": "cd backend && npm test",
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "keywords": [
+    "museum",
+    "aws",
+    "serverless",
+    "dynamodb",
+    "react",
+    "lambda"
+  ],
+  "author": "",
+  "license": "ISC"
+}

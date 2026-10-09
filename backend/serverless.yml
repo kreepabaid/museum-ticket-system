@@ -1,0 +1,463 @@
+service: museum-ticket-system
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  region: ap-south-1
+  stage: dev
+  environment:
+    USERS_TABLE: Museum_Users_${sls:stage}
+    EXHIBITIONS_TABLE: Museum_Exhibitions_${sls:stage}
+    SCHEDULES_TABLE: Museum_Schedules_${sls:stage}
+    BOOKINGS_TABLE: Museum_Bookings_${sls:stage}
+    ENTRY_RECORDS_TABLE: Museum_EntryRecords_${sls:stage}
+    STATISTICS_TABLE: Museum_Statistics_${sls:stage}
+    SNS_TOPIC_ARN: !Ref MuseumNotificationTopic
+    JWT_SECRET: ${env:JWT_SECRET}
+    TICKET_SECRET: ${env:TICKET_SECRET}
+    USE_LOCAL_STORE: 'false'
+
+plugins:
+  - serverless-iam-roles-per-function
+
+functions:
+
+  # 1. Auth Functions
+  register:
+    handler: src/handlers/auth.register
+    events:
+      - http:
+          path: /auth/register
+          method: post
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+          - dynamodb:Scan
+          - dynamodb:Query
+        Resource:
+          - !GetAtt UsersTable.Arn
+          - !Join [ "/", [ !GetAtt UsersTable.Arn, "index", "*" ] ]
+
+  login:
+    handler: src/handlers/auth.login
+    events:
+      - http:
+          path: /auth/login
+          method: post
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+          - dynamodb:Query
+        Resource:
+          - !GetAtt UsersTable.Arn
+          - !Join [ "/", [ !GetAtt UsersTable.Arn, "index", "*" ] ]
+
+  authMe:
+    handler: src/handlers/auth.me
+    events:
+      - http:
+          path: /auth/me
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:GetItem
+        Resource: !GetAtt UsersTable.Arn
+
+  # 2. Exhibitions & Schedules
+  listExhibitions:
+    handler: src/handlers/exhibitions.list
+    events:
+      - http:
+          path: /exhibitions
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+        Resource: !GetAtt ExhibitionsTable.Arn
+
+  getExhibition:
+    handler: src/handlers/exhibitions.get
+    events:
+      - http:
+          path: /exhibitions/{id}
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:GetItem
+        Resource: !GetAtt ExhibitionsTable.Arn
+
+  createExhibition:
+    handler: src/handlers/exhibitions.create
+    events:
+      - http:
+          path: /exhibitions
+          method: post
+          cors: true
+      - http:
+          path: /admin/exhibitions
+          method: post
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+        Resource: !GetAtt ExhibitionsTable.Arn
+
+  listSchedules:
+    handler: src/handlers/schedules.list
+    events:
+      - http:
+          path: /exhibitions/{id}/schedules
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+          - dynamodb:Scan
+        Resource: !GetAtt SchedulesTable.Arn
+
+  createSchedule:
+    handler: src/handlers/schedules.create
+    events:
+      - http:
+          path: /exhibitions/{id}/schedules
+          method: post
+          cors: true
+      - http:
+          path: /admin/exhibitions/{id}/schedules
+          method: post
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+        Resource: !GetAtt SchedulesTable.Arn
+
+  # 3. Bookings
+  createBooking:
+    handler: src/handlers/bookings.create
+    events:
+      - http:
+          path: /bookings
+          method: post
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:GetItem
+          - dynamodb:UpdateItem
+          - dynamodb:PutItem
+          - dynamodb:TransactWriteItems
+        Resource:
+          - !GetAtt BookingsTable.Arn
+          - !GetAtt SchedulesTable.Arn
+          - !GetAtt StatisticsTable.Arn
+          - !GetAtt ExhibitionsTable.Arn
+      - Effect: Allow
+        Action:
+          - sns:Publish
+        Resource: !Ref MuseumNotificationTopic
+
+  cancelBooking:
+    handler: src/handlers/bookings.cancel
+    events:
+      - http:
+          path: /bookings/{id}/cancel
+          method: post
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:GetItem
+          - dynamodb:UpdateItem
+          - dynamodb:TransactWriteItems
+        Resource:
+          - !GetAtt BookingsTable.Arn
+          - !GetAtt SchedulesTable.Arn
+          - !GetAtt StatisticsTable.Arn
+      - Effect: Allow
+        Action:
+          - sns:Publish
+        Resource: !Ref MuseumNotificationTopic
+
+  myBookings:
+    handler: src/handlers/bookings.myBookings
+    events:
+      - http:
+          path: /bookings/me
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+        Resource:
+          - !GetAtt BookingsTable.Arn
+          - !Join [ "/", [ !GetAtt BookingsTable.Arn, "index", "VisitorHistoryIndex" ] ]
+  getBooking:
+    handler: src/handlers/bookings.getBooking
+    events:
+      - http:
+          path: /bookings/{id}
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:GetItem
+        Resource: !GetAtt BookingsTable.Arn
+
+  # 4. Tickets & Validation
+  validateTicket:
+    handler: src/handlers/tickets.validate
+    events:
+      - http:
+          path: /admin/tickets/validate
+          method: post
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+          - dynamodb:GetItem
+          - dynamodb:UpdateItem
+          - dynamodb:PutItem
+        Resource:
+          - !GetAtt BookingsTable.Arn
+          - !GetAtt EntryRecordsTable.Arn
+          - !GetAtt StatisticsTable.Arn
+
+  getTicket:
+    handler: src/handlers/tickets.getTicket
+    events:
+      - http:
+          path: /tickets/{ticketId}
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+          - dynamodb:GetItem
+        Resource: !GetAtt BookingsTable.Arn
+
+  # 5. Admin Dashboard, Analytics, Monitoring & Reports
+  adminDashboard:
+    handler: src/handlers/admin.dashboard
+    events:
+      - http:
+          path: /admin/dashboard
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:GetItem
+          - dynamodb:Scan
+        Resource:
+          - !GetAtt StatisticsTable.Arn
+          - !GetAtt ExhibitionsTable.Arn
+          - !GetAtt SchedulesTable.Arn
+
+  adminExhibitionStats:
+    handler: src/handlers/admin.exhibitionStats
+    events:
+      - http:
+          path: /admin/exhibition-stats
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+        Resource:
+          - !GetAtt ExhibitionsTable.Arn
+          - !GetAtt SchedulesTable.Arn
+          - !GetAtt StatisticsTable.Arn
+
+  adminDailyStats:
+    handler: src/handlers/admin.dailyStats
+    events:
+      - http:
+          path: /admin/daily-stats
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+        Resource: !GetAtt StatisticsTable.Arn
+
+  adminEntries:
+    handler: src/handlers/admin.entries
+    events:
+      - http:
+          path: /admin/entries
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+        Resource: !GetAtt EntryRecordsTable.Arn
+
+  adminReports:
+    handler: src/handlers/admin.reports
+    events:
+      - http:
+          path: /admin/reports
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:GetItem
+          - dynamodb:Scan
+        Resource:
+          - !GetAtt StatisticsTable.Arn
+          - !GetAtt ExhibitionsTable.Arn
+          - !GetAtt SchedulesTable.Arn
+          - !GetAtt EntryRecordsTable.Arn
+
+  notificationsList:
+    handler: src/handlers/notifications.list
+    events:
+      - http:
+          path: /notifications/me
+          method: get
+          cors: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+        Resource: !GetAtt BookingsTable.Arn
+
+resources:
+  Resources:
+
+    # 1. Users Table with GSI on Email
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.USERS_TABLE}
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: email
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: email-index
+            KeySchema:
+              - AttributeName: email
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+
+    # 2. Exhibitions Table
+    ExhibitionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.EXHIBITIONS_TABLE}
+        AttributeDefinitions:
+          - AttributeName: exhibitionId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: exhibitionId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
+    # 3. Schedules Table with Composite Key
+    SchedulesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.SCHEDULES_TABLE}
+        AttributeDefinitions:
+          - AttributeName: exhibitionId
+            AttributeType: S
+          - AttributeName: dateSlot
+            AttributeType: S
+        KeySchema:
+          - AttributeName: exhibitionId
+            KeyType: HASH
+          - AttributeName: dateSlot
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+
+    # 4. Bookings Table with GSI on Visitor History
+    BookingsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.BOOKINGS_TABLE}
+        AttributeDefinitions:
+          - AttributeName: bookingId
+            AttributeType: S
+          - AttributeName: visitorId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: bookingId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: VisitorHistoryIndex
+            KeySchema:
+              - AttributeName: visitorId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+
+    # 5. Entry Records Table with GSI on Date
+    EntryRecordsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.ENTRY_RECORDS_TABLE}
+        AttributeDefinitions:
+          - AttributeName: entryId
+            AttributeType: S
+          - AttributeName: entryDate
+            AttributeType: S
+        KeySchema:
+          - AttributeName: entryId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: date-index
+            KeySchema:
+              - AttributeName: entryDate
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+
+    # 6. Read-Optimized Statistics Table
+    StatisticsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.STATISTICS_TABLE}
+        AttributeDefinitions:
+          - AttributeName: statKey
+            AttributeType: S
+        KeySchema:
+          - AttributeName: statKey
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
+    # 7. Amazon SNS Notification Topic
+    MuseumNotificationTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: MuseumNotifications_${sls:stage}
